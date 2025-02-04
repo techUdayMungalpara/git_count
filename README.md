@@ -22,22 +22,22 @@ pip install git-count
 
 ```bash
 # Basic usage
-git_count
+git-count
 
 # Show commits by month
-git_count -p month
+git-count -p month
 
 # Filter by author
-git_count -a "uday"
+git-count -a "uday"
 
 # Show commits since a specific date
-git_count -s "2023-01-01"
+git-count -s "2023-01-01"
 
 # Show detailed repository insights
-git_count -i
+git-count -i
 
 # Output as JSON
-git_count -o json
+git-count -o json
 ```
 
 ## Options
