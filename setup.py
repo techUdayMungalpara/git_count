@@ -5,9 +5,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="git-count",
-    version="0.1.0",
+    version="0.1.1",
     author="Uday Mungalpara",
-    description="A command-line tool for visualizing git repository statistics with ASCII bars",
+    description="A Git commit activity visualization tool with detailed repository insights",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/techUdayMungalpara/git_count",
@@ -15,6 +15,7 @@ setup(
     classifiers=[
         "Intended Audience :: Developers",
         "Topic :: Utilities",
+        "Topic :: Software Development :: Version Control :: Git",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",
