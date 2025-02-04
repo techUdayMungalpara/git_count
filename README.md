@@ -5,7 +5,7 @@ A powerful command-line tool for analyzing and visualizing git repository commit
 ## Installation
 
 ```bash
-pip install git_count
+pip install git-count
 ```
 
 ## Features
