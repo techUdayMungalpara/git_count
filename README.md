@@ -1,6 +1,6 @@
 # git_count
 
-A powerful command-line tool for analyzing and visualizing git repository commit statistics.
+A Git commit activity visualization tool with detailed repository insights.
 
 ## Installation
 
