@@ -2,6 +2,8 @@
 
 A Git commit activity visualization tool with detailed repository insights.
 
+[![PyPI Downloads](https://static.pepy.tech/badge/git-count)](https://pepy.tech/projects/git-count)
+
 ## Installation
 
 ```bash
