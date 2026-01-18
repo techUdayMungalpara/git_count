@@ -5,6 +5,7 @@ import os
 import subprocess
 from collections import defaultdict
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 # Read color settings from config file or environment variables
 CONFIG_FILE = os.path.expanduser("~/.gitbarsrc")
@@ -22,8 +23,13 @@ COLORS = {
 
 
 def get_git_logs(
-    period="day", author=None, since=None, until=None, path=None, max_commits=None
-):
+    period: str = "day",
+    author: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    path: Optional[str] = None,
+    max_commits: Optional[int] = None,
+) -> Tuple[Dict[str, int], List[Dict[str, Any]]]:
     """Get git logs and group them by the specified period."""
     cmd = ["git", "log", "--format=%aI|%h|%an|%s"]
     if author:
@@ -45,7 +51,6 @@ def get_git_logs(
         return {}, []
 
     try:
-        print(f"Executing command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
         commits = result.stdout.strip().split("\n")
@@ -101,7 +106,7 @@ def get_git_logs(
         return {}, []
 
 
-def get_commit_details(commit_data):
+def get_commit_details(commit_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Get repository statistics including commit patterns."""
     authors = defaultdict(int)
     hours = defaultdict(int)
@@ -154,7 +159,9 @@ def get_commit_details(commit_data):
     }
 
 
-def render_bars(commits, bar_char="▀", max_width=None):
+def render_bars(
+    commits: Dict[str, int], bar_char: str = "▀", max_width: Optional[int] = None
+) -> None:
     """Render ASCII bars for commit counts."""
     if not commits:
         print(f"{COLORS['alert']}No commits found{COLORS['reset']}")
@@ -182,7 +189,9 @@ def render_bars(commits, bar_char="▀", max_width=None):
         )
 
 
-def render_activity_chart(data, title, max_width=40, bar_char="█"):
+def render_activity_chart(
+    data: Dict[any, int], title: str, max_width: int = 40, bar_char: str = "█"
+) -> None:
     """Render a horizontal bar chart for activity data."""
     if not data:
         return
@@ -200,7 +209,7 @@ def render_activity_chart(data, title, max_width=40, bar_char="█"):
         )
 
 
-def print_repository_insights(commit_data):
+def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
     """Print detailed repository insights."""
     try:
         stats = get_commit_details(commit_data)
@@ -263,7 +272,7 @@ def print_repository_insights(commit_data):
         )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Enhanced Git commit activity visualization", add_help=False
     )
