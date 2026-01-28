@@ -1,10 +1,13 @@
 import argparse
 import configparser
+import csv
+import io
 import json
 import os
 import subprocess
+import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 # Read color settings from config file or environment variables
@@ -159,6 +162,214 @@ def get_commit_details(commit_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def calculate_streaks(commit_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate current and longest commit streaks (consecutive days with commits)."""
+    if not commit_data:
+        return {"current_streak": 0, "longest_streak": 0, "longest_streak_start": None, "longest_streak_end": None}
+
+    commit_dates = sorted({c["date"].date() for c in commit_data})
+
+    longest_streak = 1
+    longest_start = commit_dates[0]
+    longest_end = commit_dates[0]
+    current_run = 1
+    current_start = commit_dates[0]
+
+    for i in range(1, len(commit_dates)):
+        if commit_dates[i] - commit_dates[i - 1] == timedelta(days=1):
+            current_run += 1
+        else:
+            if current_run > longest_streak:
+                longest_streak = current_run
+                longest_start = current_start
+                longest_end = commit_dates[i - 1]
+            current_run = 1
+            current_start = commit_dates[i]
+
+    if current_run > longest_streak:
+        longest_streak = current_run
+        longest_start = current_start
+        longest_end = commit_dates[-1]
+
+    # Current streak: count backwards from today (or most recent commit date)
+    today = datetime.now().date()
+    current_streak = 0
+    check_date = today
+    date_set = set(commit_dates)
+
+    while check_date in date_set:
+        current_streak += 1
+        check_date -= timedelta(days=1)
+
+    # If today has no commits, check if yesterday started a streak
+    if current_streak == 0:
+        check_date = today - timedelta(days=1)
+        while check_date in date_set:
+            current_streak += 1
+            check_date -= timedelta(days=1)
+
+    return {
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+        "longest_streak_start": longest_start,
+        "longest_streak_end": longest_end,
+    }
+
+
+def get_file_churn(
+    author: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    path: Optional[str] = None,
+    top_n: int = 15,
+) -> List[Tuple[str, int]]:
+    """Get the most frequently changed files in the repository."""
+    cmd = ["git", "log", "--name-only", "--format="]
+    if author:
+        cmd.extend(["--author", author])
+    if since:
+        cmd.extend(["--since", since])
+    if until:
+        cmd.extend(["--until", until])
+    if path:
+        cmd.append(path)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        file_counts: Dict[str, int] = defaultdict(int)
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if line:
+                file_counts[line] += 1
+
+        sorted_files = sorted(file_counts.items(), key=lambda x: x[1], reverse=True)
+        return sorted_files[:top_n]
+    except subprocess.CalledProcessError:
+        return []
+
+
+def get_velocity(
+    period: str = "day",
+    author: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    path: Optional[str] = None,
+) -> Dict[str, Dict[str, int]]:
+    """Get lines added/removed per period using git numstat."""
+    cmd = ["git", "log", "--numstat", "--format=%aI"]
+    if author:
+        cmd.extend(["--author", author])
+    if since:
+        cmd.extend(["--since", since])
+    if until:
+        cmd.extend(["--until", until])
+    if path:
+        cmd.append(path)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        velocity: Dict[str, Dict[str, int]] = defaultdict(lambda: {"added": 0, "removed": 0})
+        current_date_key = None
+
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # Date lines start with a year (ISO format)
+            if line and len(line) > 10 and line[4] == "-":
+                try:
+                    date = datetime.fromisoformat(line)
+                    if period == "day":
+                        current_date_key = date.strftime("%Y-%m-%d")
+                    elif period == "month":
+                        current_date_key = date.strftime("%Y-%m")
+                    elif period == "year":
+                        current_date_key = date.strftime("%Y")
+                except ValueError:
+                    pass
+            elif current_date_key and "\t" in line:
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    try:
+                        added = int(parts[0]) if parts[0] != "-" else 0
+                        removed = int(parts[1]) if parts[1] != "-" else 0
+                        velocity[current_date_key]["added"] += added
+                        velocity[current_date_key]["removed"] += removed
+                    except ValueError:
+                        continue
+
+        return dict(velocity)
+    except subprocess.CalledProcessError:
+        return {}
+
+
+def render_velocity(velocity: Dict[str, Dict[str, int]]) -> None:
+    """Render a velocity chart showing lines added/removed per period."""
+    if not velocity:
+        print(f"{COLORS['alert']}No velocity data found{COLORS['reset']}")
+        return
+
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except OSError:
+        terminal_width = 80
+    max_width = min(terminal_width - 40, 60)
+    all_values = []
+    for v in velocity.values():
+        all_values.extend([v["added"], v["removed"]])
+    max_val = max(all_values) if all_values else 1
+
+    total_added = sum(v["added"] for v in velocity.values())
+    total_removed = sum(v["removed"] for v in velocity.values())
+    net = total_added - total_removed
+
+    print(f"\n{COLORS['title']}Code Velocity (lines changed){COLORS['reset']}")
+    print(
+        f"Total: {COLORS['number']}+{total_added}{COLORS['reset']} / "
+        f"{COLORS['alert']}-{total_removed}{COLORS['reset']} / "
+        f"net {COLORS['number']}{'+' if net >= 0 else ''}{net}{COLORS['reset']}"
+    )
+    print()
+
+    for date_key in sorted(velocity.keys(), reverse=True):
+        v = velocity[date_key]
+        added_width = int((v["added"] / max_val) * max_width) if max_val else 0
+        removed_width = int((v["removed"] / max_val) * max_width) if max_val else 0
+        added_bar = "+" * added_width
+        removed_bar = "-" * removed_width
+        print(
+            f"{COLORS['date']}{date_key}{COLORS['reset']}  "
+            f"\033[0;32m{added_bar}{COLORS['reset']}"
+            f"{COLORS['alert']}{removed_bar}{COLORS['reset']}  "
+            f"{COLORS['number']}+{v['added']}{COLORS['reset']}/"
+            f"{COLORS['alert']}-{v['removed']}{COLORS['reset']}"
+        )
+
+
+def render_file_churn(churn_data: List[Tuple[str, int]]) -> None:
+    """Render a chart of most frequently changed files."""
+    if not churn_data:
+        print(f"{COLORS['alert']}No file change data found{COLORS['reset']}")
+        return
+
+    max_changes = churn_data[0][1]
+    max_width = 30
+
+    print(f"\n{COLORS['title']}Most Frequently Changed Files (hotspots){COLORS['reset']}")
+    for filepath, count in churn_data:
+        bar_width = int((count / max_changes) * max_width)
+        bar = "█" * bar_width
+        # Truncate long paths from the left
+        display_path = filepath
+        if len(display_path) > 45:
+            display_path = "..." + filepath[-42:]
+        print(
+            f"{COLORS['date']}{display_path.ljust(48)}{COLORS['reset']} "
+            f"{COLORS['number']}{str(count).rjust(4)}{COLORS['reset']} "
+            f"{COLORS['bar']}{bar}{COLORS['reset']}"
+        )
+
+
 def render_bars(
     commits: Dict[str, int], bar_char: str = "▀", max_width: Optional[int] = None
 ) -> None:
@@ -176,7 +387,10 @@ def render_bars(
 
     max_commits = max(commits.values())
     if not max_width:
-        max_width = os.get_terminal_size().columns - 20
+        try:
+            max_width = os.get_terminal_size().columns - 20
+        except OSError:
+            max_width = 60
     bar_unit = max_width / max_commits
 
     for date in sorted(commits.keys(), reverse=True):
@@ -190,7 +404,7 @@ def render_bars(
 
 
 def render_activity_chart(
-    data: Dict[any, int], title: str, max_width: int = 40, bar_char: str = "█"
+    data: Dict[Any, int], title: str, max_width: int = 40, bar_char: str = "█"
 ) -> None:
     """Render a horizontal bar chart for activity data."""
     if not data:
@@ -229,6 +443,21 @@ def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
         print(f"Project age: {COLORS['number']}{project_age} days{COLORS['reset']}")
         print(
             f"Average commits per day: {COLORS['number']}{commits_per_day:.1f}{COLORS['reset']}"
+        )
+
+        # Commit Streaks
+        streaks = calculate_streaks(commit_data)
+        print(f"\n{COLORS['title']}Streaks:{COLORS['reset']}")
+        print(
+            f"Current streak: {COLORS['number']}{streaks['current_streak']} days{COLORS['reset']}"
+        )
+        print(
+            f"Longest streak: {COLORS['number']}{streaks['longest_streak']} days{COLORS['reset']}"
+            + (
+                f" ({COLORS['date']}{streaks['longest_streak_start']} → {streaks['longest_streak_end']}{COLORS['reset']})"
+                if streaks["longest_streak_start"]
+                else ""
+            )
         )
 
         # Activity Patterns
@@ -308,10 +537,33 @@ def main() -> None:
         help="Show detailed repository insights",
     )
     parser.add_argument(
+        "-c",
+        "--churn",
+        action="store_true",
+        help="Show most frequently changed files (hotspots)",
+    )
+    parser.add_argument(
+        "-v",
+        "--velocity",
+        action="store_true",
+        help="Show code velocity (lines added/removed per period)",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="store_true",
+        help="Show version number",
+    )
+    parser.add_argument(
         "-h", "--help", action="store_true", help="Show this help message"
     )
 
     args = parser.parse_args()
+
+    if args.version:
+        from git_count import __version__
+        print(f"git-count {__version__}")
+        return
 
     if args.help:
         parser.print_help()
@@ -347,15 +599,36 @@ def main() -> None:
         }
         print(json.dumps(output, indent=2))
     elif args.output == "csv":
-        print("Date,Hash,Author,Message")
+        writer = csv.writer(sys.stdout)
+        writer.writerow(["Date", "Hash", "Author", "Message"])
         for commit in commit_data:
-            print(
-                f"{commit['date'].isoformat()},{commit['hash']},{commit['author']},{commit['message']}"
-            )
+            writer.writerow([
+                commit["date"].isoformat(),
+                commit["hash"],
+                commit["author"],
+                commit["message"],
+            ])
     else:
         render_bars(grouped_commits)
         if args.insights:
             print_repository_insights(commit_data)
+        if args.churn:
+            churn_data = get_file_churn(
+                author=args.author,
+                since=args.since,
+                until=args.until,
+                path=args.directory,
+            )
+            render_file_churn(churn_data)
+        if args.velocity:
+            velocity_data = get_velocity(
+                period=args.period,
+                author=args.author,
+                since=args.since,
+                until=args.until,
+                path=args.directory,
+            )
+            render_velocity(velocity_data)
 
 
 if __name__ == "__main__":

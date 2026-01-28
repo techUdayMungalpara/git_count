@@ -4,6 +4,7 @@ A powerful Git commit activity visualization tool with detailed repository insig
 
 [![PyPI Downloads](https://static.pepy.tech/badge/git-count)](https://pepy.tech/projects/git-count)
 ![Python Version](https://img.shields.io/pypi/pyversions/git-count)
+[![CI](https://github.com/techUdayMungalpara/git_count/actions/workflows/ci.yml/badge.svg)](https://github.com/techUdayMungalpara/git_count/actions/workflows/ci.yml)
 
 ## Installation
 
@@ -19,6 +20,9 @@ pip install git-count
 - Date range filtering
 - Directory-specific analysis
 - Detailed repository insights
+- Commit streak tracking (current and longest streaks)
+- File churn analysis (identify hotspot files)
+- Code velocity metrics (lines added/removed per period)
 - Multiple output formats (text, JSON, CSV)
 
 ## Usage
@@ -41,6 +45,15 @@ git-count -i
 
 # Output as JSON
 git-count -o json
+
+# Show most frequently changed files
+git-count -c
+
+# Show code velocity (lines added/removed)
+git-count -v
+
+# Show velocity by month
+git-count -v -p month
 ```
 
 ## Options
@@ -53,6 +66,9 @@ git-count -o json
 - `-m, --max-commits`: Limit the number of commits to display
 - `-o, --output`: Output format (text/json/csv)
 - `-i, --insights`: Show detailed repository insights
+- `-c, --churn`: Show most frequently changed files (hotspots)
+- `-v, --velocity`: Show code velocity (lines added/removed per period)
+- `-V, --version`: Show version number
 - `-h, --help`: Show help message
 
 ## Advanced Examples
@@ -70,6 +86,12 @@ git-count -d src/ -p month
 
 # Get insights for team productivity
 git-count -i -s "2025-01-01"
+
+# Find hotspot files changed by a specific author
+git-count -c -a "uday" -s "2024-01-01"
+
+# Full analysis: insights + churn + velocity
+git-count -i -c -v -p month
 ```
 
 ## Customization
@@ -92,10 +114,21 @@ The insights mode (`-i`) shows:
 
 - Project timeline and age
 - Average commits per day
+- Current and longest commit streaks
 - Most active hours and days
 - Commit types distribution (features, fixes, docs, etc.)
 - Top contributors
 - Activity patterns with visual charts
+
+The churn mode (`-c`) shows:
+
+- Most frequently changed files ranked by number of commits
+- Visual bar chart of file change frequency
+
+The velocity mode (`-v`) shows:
+
+- Lines added/removed per period with color-coded bars
+- Total lines added, removed, and net change
 
 ## Requirements
 
