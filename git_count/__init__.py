@@ -1,6 +1,6 @@
 """git-count: A Git commit activity visualization tool with detailed repository insights."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Uday Mungalpara"
 __license__ = "MIT"
 

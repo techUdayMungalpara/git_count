@@ -10,6 +10,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+
+try:
+    from plyer import notification
+    HAS_PLYER = True
+except ImportError:
+    HAS_PLYER = False
+
 # Read color settings from config file or environment variables
 CONFIG_FILE = os.path.expanduser("~/.gitbarsrc")
 config = configparser.ConfigParser()
@@ -22,6 +34,21 @@ COLORS = {
     "number": config.get("colors", "number", fallback="\033[0;33m"),
     "bar": config.get("colors", "bar", fallback="\033[0;34m"),
     "alert": config.get("colors", "alert", fallback="\033[0;31m"),
+}
+
+# Emoji mappings for emoji mode
+EMOJIS = {
+    "fire": "🔥",
+    "rocket": "🚀",
+    "star": "⭐",
+    "chart_up": "📈",
+    "chart_down": "📉",
+    "trophy": "🏆",
+    "calendar": "📅",
+    "warning": "⚠️",
+    "check": "✅",
+    "sparkles": "✨",
+    "tada": "🎉",
 }
 
 
@@ -303,7 +330,7 @@ def get_velocity(
         return {}
 
 
-def render_velocity(velocity: Dict[str, Dict[str, int]]) -> None:
+def render_velocity(velocity: Dict[str, Dict[str, int]], use_emoji: bool = False) -> None:
     """Render a velocity chart showing lines added/removed per period."""
     if not velocity:
         print(f"{COLORS['alert']}No velocity data found{COLORS['reset']}")
@@ -323,11 +350,15 @@ def render_velocity(velocity: Dict[str, Dict[str, int]]) -> None:
     total_removed = sum(v["removed"] for v in velocity.values())
     net = total_added - total_removed
 
-    print(f"\n{COLORS['title']}Code Velocity (lines changed){COLORS['reset']}")
+    title_prefix = f"{EMOJIS['rocket']} " if use_emoji else ""
+    trend = EMOJIS['chart_up'] if net >= 0 else EMOJIS['chart_down']
+    trend_emoji = f" {trend}" if use_emoji else ""
+
+    print(f"\n{COLORS['title']}{title_prefix}Code Velocity (lines changed){COLORS['reset']}")
     print(
         f"Total: {COLORS['number']}+{total_added}{COLORS['reset']} / "
         f"{COLORS['alert']}-{total_removed}{COLORS['reset']} / "
-        f"net {COLORS['number']}{'+' if net >= 0 else ''}{net}{COLORS['reset']}"
+        f"net {COLORS['number']}{'+' if net >= 0 else ''}{net}{COLORS['reset']}{trend_emoji}"
     )
     print()
 
@@ -346,7 +377,7 @@ def render_velocity(velocity: Dict[str, Dict[str, int]]) -> None:
         )
 
 
-def render_file_churn(churn_data: List[Tuple[str, int]]) -> None:
+def render_file_churn(churn_data: List[Tuple[str, int]], use_emoji: bool = False) -> None:
     """Render a chart of most frequently changed files."""
     if not churn_data:
         print(f"{COLORS['alert']}No file change data found{COLORS['reset']}")
@@ -355,7 +386,8 @@ def render_file_churn(churn_data: List[Tuple[str, int]]) -> None:
     max_changes = churn_data[0][1]
     max_width = 30
 
-    print(f"\n{COLORS['title']}Most Frequently Changed Files (hotspots){COLORS['reset']}")
+    title_prefix = f"{EMOJIS['fire']} " if use_emoji else ""
+    print(f"\n{COLORS['title']}{title_prefix}Most Frequently Changed Files (hotspots){COLORS['reset']}")
     for filepath, count in churn_data:
         bar_width = int((count / max_changes) * max_width)
         bar = "█" * bar_width
@@ -371,7 +403,7 @@ def render_file_churn(churn_data: List[Tuple[str, int]]) -> None:
 
 
 def render_bars(
-    commits: Dict[str, int], bar_char: str = "▀", max_width: Optional[int] = None
+    commits: Dict[str, int], bar_char: str = "▀", max_width: Optional[int] = None, use_emoji: bool = False
 ) -> None:
     """Render ASCII bars for commit counts."""
     if not commits:
@@ -381,8 +413,9 @@ def render_bars(
     total_commits = sum(commits.values())
     unique_days = len(commits)
 
+    title_prefix = f"{EMOJIS['chart_up']} " if use_emoji else ""
     print(
-        f"\n{COLORS['title']}Activity Summary ({total_commits} commits over {unique_days} days){COLORS['reset']}"
+        f"\n{COLORS['title']}{title_prefix}Activity Summary ({total_commits} commits over {unique_days} days){COLORS['reset']}"
     )
 
     max_commits = max(commits.values())
@@ -404,13 +437,14 @@ def render_bars(
 
 
 def render_activity_chart(
-    data: Dict[Any, int], title: str, max_width: int = 40, bar_char: str = "█"
+    data: Dict[Any, int], title: str, max_width: int = 40, bar_char: str = "█", use_emoji: bool = False
 ) -> None:
     """Render a horizontal bar chart for activity data."""
     if not data:
         return
 
-    print(f"\n{COLORS['title']}{title}:{COLORS['reset']}")
+    title_prefix = f"{EMOJIS['chart_up']} " if use_emoji else ""
+    print(f"\n{COLORS['title']}{title_prefix}{title}:{COLORS['reset']}")
     max_value = max(data.values())
     max_label_length = max(len(str(k)) for k in data.keys())
 
@@ -423,17 +457,342 @@ def render_activity_chart(
         )
 
 
-def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
+def render_sparkline(values: List[int]) -> str:
+    """Render a sparkline using unicode block characters."""
+    if not values:
+        return ""
+
+    spark_chars = "▁▂▃▄▅▆▇█"
+    min_val = min(values)
+    max_val = max(values)
+
+    if max_val == min_val:
+        return spark_chars[0] * len(values)
+
+    sparkline = ""
+    for val in values:
+        normalized = (val - min_val) / (max_val - min_val)
+        index = min(int(normalized * (len(spark_chars) - 1)), len(spark_chars) - 1)
+        sparkline += spark_chars[index]
+
+    return sparkline
+
+
+def render_boxplot(values: List[int], title: str = "Distribution", use_emoji: bool = False) -> None:
+    """Render a box plot showing statistical distribution."""
+    if not values:
+        print(f"{COLORS['alert']}No data for box plot{COLORS['reset']}")
+        return
+
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+
+    # Calculate quartiles
+    q1_idx = n // 4
+    q2_idx = n // 2
+    q3_idx = (3 * n) // 4
+
+    min_val = sorted_values[0]
+    q1 = sorted_values[q1_idx]
+    median = sorted_values[q2_idx]
+    q3 = sorted_values[q3_idx]
+    max_val = sorted_values[-1]
+
+    # Calculate IQR and outliers
+    iqr = q3 - q1
+    lower_fence = q1 - 1.5 * iqr
+    upper_fence = q3 + 1.5 * iqr
+    outliers = [v for v in sorted_values if v < lower_fence or v > upper_fence]
+
+    title_prefix = f"{EMOJIS['chart_up']} " if use_emoji else ""
+    print(f"\n{COLORS['title']}{title_prefix}{title}:{COLORS['reset']}")
+    print(f"Min: {COLORS['number']}{min_val}{COLORS['reset']}, "
+          f"Q1: {COLORS['number']}{q1}{COLORS['reset']}, "
+          f"Median: {COLORS['number']}{median}{COLORS['reset']}, "
+          f"Q3: {COLORS['number']}{q3}{COLORS['reset']}, "
+          f"Max: {COLORS['number']}{max_val}{COLORS['reset']}")
+
+    if outliers:
+        outlier_marker = f" {EMOJIS['warning']}" if use_emoji else " •"
+        print(f"Outliers: {COLORS['alert']}{len(outliers)}{outlier_marker}{COLORS['reset']}")
+
+    # Visual representation
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except OSError:
+        terminal_width = 80
+
+    chart_width = min(terminal_width - 20, 60)
+    value_range = max_val - min_val if max_val > min_val else 1
+
+    def scale(val):
+        return int(((val - min_val) / value_range) * chart_width)
+
+    min_pos = 0
+    q1_pos = scale(q1)
+    med_pos = scale(median)
+    q3_pos = scale(q3)
+    max_pos = scale(max_val)
+
+    # Draw the box plot
+    line = [" "] * (chart_width + 1)
+
+    # Whiskers
+    for i in range(min_pos, q1_pos):
+        line[i] = "─"
+    for i in range(q3_pos + 1, max_pos + 1):
+        line[i] = "─"
+
+    # Box
+    for i in range(q1_pos, q3_pos + 1):
+        line[i] = "█"
+
+    # Median line
+    line[med_pos] = "│"
+
+    # Markers
+    line[min_pos] = "├"
+    line[max_pos] = "┤"
+
+    print(f"  {COLORS['bar']}{''.join(line)}{COLORS['reset']}")
+
+
+def render_violinplot(data: Dict[str, int], title: str = "Distribution", use_emoji: bool = False) -> None:
+    """Render a violin plot showing density distribution."""
+    if not data:
+        print(f"{COLORS['alert']}No data for violin plot{COLORS['reset']}")
+        return
+
+    title_prefix = f"{EMOJIS['chart_up']} " if use_emoji else ""
+    print(f"\n{COLORS['title']}{title_prefix}{title}:{COLORS['reset']}")
+
+    max_value = max(data.values())
+    max_width = 20
+    density_chars = " ░▒▓█"
+
+    for key, value in data.items():
+        width = int((value / max_value) * max_width)
+        # Create symmetric violin shape
+        left_width = width // 2
+        right_width = width - left_width
+
+        # Use density characters based on value
+        density_index = min(int((value / max_value) * (len(density_chars) - 1)), len(density_chars) - 1)
+        char = density_chars[density_index]
+
+        left_side = char * left_width
+        right_side = char * right_width
+
+        label = str(key).rjust(12)
+        print(
+            f"{label} │{left_side.rjust(max_width // 2)}{right_side.ljust(max_width // 2)}│ "
+            f"{COLORS['number']}{value}{COLORS['reset']}"
+        )
+
+
+def render_contribution_heatmap(commit_data: List[Dict[str, Any]], use_emoji: bool = False) -> None:
+    """Render a GitHub-style contribution heatmap."""
+    if not commit_data:
+        print(f"{COLORS['alert']}No commit data for heatmap{COLORS['reset']}")
+        return
+
+    # Get last 365 days
+    today = datetime.now().date()
+    start_date = today - timedelta(days=364)
+
+    # Count commits per day
+    daily_commits: Dict[str, int] = defaultdict(int)
+    for commit in commit_data:
+        commit_date = commit["date"].date()
+        if start_date <= commit_date <= today:
+            daily_commits[commit_date.isoformat()] = daily_commits.get(commit_date.isoformat(), 0) + 1
+
+    # Create intensity map
+    intensity_chars = ["·", "░", "▒", "▓", "█"]
+
+    def get_intensity(count: int) -> str:
+        if count == 0:
+            return intensity_chars[0]
+        elif count <= 3:
+            return intensity_chars[1]
+        elif count <= 7:
+            return intensity_chars[2]
+        elif count <= 15:
+            return intensity_chars[3]
+        else:
+            return intensity_chars[4]
+
+    def get_color(count: int) -> str:
+        if count == 0:
+            return "\033[0;37m"  # Gray
+        elif count <= 3:
+            return "\033[0;32m"  # Green
+        elif count <= 7:
+            return "\033[0;33m"  # Yellow
+        elif count <= 15:
+            return "\033[0;31m"  # Red
+        else:
+            return "\033[1;31m"  # Bright red
+
+    title_prefix = f"{EMOJIS['calendar']} " if use_emoji else ""
+    print(f"\n{COLORS['title']}{title_prefix}Contribution Heatmap (Last 365 Days){COLORS['reset']}")
+
+    # Calculate weeks
+    weeks = []
+    current_date = start_date
+    week = [None] * 7
+    day_of_week = current_date.weekday()
+
+    while current_date <= today:
+        week[day_of_week] = current_date
+
+        if day_of_week == 6:  # Sunday
+            weeks.append(week)
+            week = [None] * 7
+
+        current_date += timedelta(days=1)
+        day_of_week = (day_of_week + 1) % 7
+
+    if any(week):
+        weeks.append(week)
+
+    # Month labels
+    month_labels = ["   "]
+    current_month = None
+    for week in weeks:
+        week_month = None
+        for day in week:
+            if day:
+                week_month = day.strftime("%b")
+                break
+        if week_month and week_month != current_month:
+            month_labels.append(week_month.ljust(2))
+            current_month = week_month
+        else:
+            month_labels.append("  ")
+
+    print("".join(month_labels[:min(len(month_labels), 53)]))
+
+    # Render heatmap
+    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for day_idx in range(7):
+        row = [weekday_labels[day_idx]]
+        for week in weeks[:52]:  # Limit to 52 weeks
+            if week[day_idx]:
+                date_str = week[day_idx].isoformat()
+                count = daily_commits.get(date_str, 0)
+                char = get_intensity(count)
+                color = get_color(count)
+                row.append(f"{color}{char}{COLORS['reset']}")
+            else:
+                row.append(" ")
+        print(" ".join(row))
+
+    # Legend
+    legend = f"\n{intensity_chars[0]} 0   {intensity_chars[1]} 1-3   {intensity_chars[2]} 4-7   {intensity_chars[3]} 8-15   {intensity_chars[4]} 16+"
+    print(legend)
+
+
+def send_notification(title: str, message: str) -> None:
+    """Send a desktop notification if plyer is available."""
+    if not HAS_PLYER:
+        return
+
+    try:
+        notification.notify(
+            title=title,
+            message=message,
+            app_name="git-count",
+            timeout=5,
+        )
+    except Exception:
+        # Silently fail if notifications aren't supported
+        pass
+
+
+def generate_svg_chart(commits: Dict[str, int], chart_type: str = "commits", title: str = "Git Activity") -> str:
+    """Generate SVG chart for commit data."""
+    if not commits:
+        return ""
+
+    # SVG dimensions
+    width = 800
+    height = 400
+    margin = 50
+    chart_width = width - 2 * margin
+    chart_height = height - 2 * margin
+
+    # Calculate scales
+    max_commits = max(commits.values())
+    sorted_dates = sorted(commits.keys())
+    num_bars = len(sorted_dates)
+    bar_width = chart_width / num_bars if num_bars > 0 else 1
+
+    # Start SVG
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">',
+        '<style>',
+        '  .bar { fill: #4CAF50; }',
+        '  .bar:hover { fill: #45a049; }',
+        '  .axis { stroke: #333; stroke-width: 2; }',
+        '  .label { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }',
+        '  .title { font-family: Arial, sans-serif; font-size: 18px; font-weight: bold; fill: #333; }',
+        '</style>',
+        f'<text x="{width/2}" y="25" text-anchor="middle" class="title">{title}</text>',
+        # Y-axis
+        f'<line x1="{margin}" y1="{margin}" x2="{margin}" y2="{height-margin}" class="axis"/>',
+        # X-axis
+        f'<line x1="{margin}" y1="{height-margin}" x2="{width-margin}" y2="{height-margin}" class="axis"/>',
+    ]
+
+    # Draw bars
+    for i, date in enumerate(sorted_dates):
+        count = commits[date]
+        bar_height = (count / max_commits) * chart_height if max_commits > 0 else 0
+        x = margin + i * bar_width
+        y = height - margin - bar_height
+
+        svg_parts.append(
+            f'<rect x="{x}" y="{y}" width="{max(bar_width - 2, 1)}" height="{bar_height}" class="bar">'
+            f'<title>{date}: {count} commits</title></rect>'
+        )
+
+    # Add some x-axis labels (every nth date to avoid crowding)
+    label_interval = max(num_bars // 10, 1)
+    for i, date in enumerate(sorted_dates):
+        if i % label_interval == 0:
+            x = margin + i * bar_width
+            # Rotate label for better fit
+            svg_parts.append(
+                f'<text x="{x}" y="{height-margin+15}" class="label" transform="rotate(45 {x} {height-margin+15})">{date}</text>'
+            )
+
+    # Y-axis labels
+    for i in range(5):
+        y = height - margin - (i * chart_height / 4)
+        value = int((i * max_commits / 4))
+        svg_parts.append(
+            f'<text x="{margin-10}" y="{y}" text-anchor="end" class="label">{value}</text>'
+        )
+
+    svg_parts.append('</svg>')
+
+    return '\n'.join(svg_parts)
+
+
+def print_repository_insights(commit_data: List[Dict[str, Any]], use_emoji: bool = False, show_sparkline: bool = False, show_boxplot: bool = False, show_violinplot: bool = False) -> None:
     """Print detailed repository insights."""
     try:
         stats = get_commit_details(commit_data)
         project_age = (stats["last_commit"] - stats["first_commit"]).days
         commits_per_day = stats["total_commits"] / max(project_age, 1)
 
-        print(f"\n{COLORS['title']}=== Repository Insights ==={COLORS['reset']}")
+        header_emoji = f"{EMOJIS['sparkles']} " if use_emoji else ""
+        print(f"\n{COLORS['title']}{header_emoji}=== Repository Insights ==={COLORS['reset']}")
 
         # Project Timeline
-        print(f"\n{COLORS['title']}Timeline:{COLORS['reset']}")
+        timeline_emoji = f"{EMOJIS['calendar']} " if use_emoji else ""
+        print(f"\n{COLORS['title']}{timeline_emoji}Timeline:{COLORS['reset']}")
         print(
             f"First commit: {COLORS['date']}{stats['first_commit'].strftime('%Y-%m-%d')}{COLORS['reset']}"
         )
@@ -447,7 +806,8 @@ def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
 
         # Commit Streaks
         streaks = calculate_streaks(commit_data)
-        print(f"\n{COLORS['title']}Streaks:{COLORS['reset']}")
+        streak_emoji = f"{EMOJIS['fire']} " if use_emoji else ""
+        print(f"\n{COLORS['title']}{streak_emoji}Streaks:{COLORS['reset']}")
         print(
             f"Current streak: {COLORS['number']}{streaks['current_streak']} days{COLORS['reset']}"
         )
@@ -460,8 +820,26 @@ def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
             )
         )
 
+        # Sparkline for last 30 days if requested
+        if show_sparkline:
+            # Get last 30 days of commits
+            today = datetime.now().date()
+            last_30_days = [(today - timedelta(days=i)) for i in range(29, -1, -1)]
+            daily_counts = []
+            commit_dates_set = defaultdict(int)
+            for commit in commit_data:
+                commit_dates_set[commit["date"].date()] += 1
+
+            for day in last_30_days:
+                daily_counts.append(commit_dates_set.get(day, 0))
+
+            sparkline = render_sparkline(daily_counts)
+            trend_emoji = f"{EMOJIS['chart_up']} " if use_emoji else ""
+            print(f"{trend_emoji}Last 30 days trend: {COLORS['bar']}{sparkline}{COLORS['reset']}")
+
         # Activity Patterns
-        print(f"\n{COLORS['title']}Activity Patterns:{COLORS['reset']}")
+        activity_emoji = f"{EMOJIS['rocket']} " if use_emoji else ""
+        print(f"\n{COLORS['title']}{activity_emoji}Activity Patterns:{COLORS['reset']}")
         print(
             f"Most active hour: {COLORS['number']}{stats['peak_hour'][0]:02d}:00{COLORS['reset']} ({stats['peak_hour'][1]} commits)"
         )
@@ -470,14 +848,34 @@ def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
         )
 
         # Detailed Activity Charts
-        render_activity_chart(stats["weekdays"], "Commits by Day of Week")
-        render_activity_chart(
-            {f"{hour:02d}:00": count for hour, count in stats["hours"].items()},
-            "Commits by Hour",
-        )
+        render_activity_chart(stats["weekdays"], "Commits by Day of Week", use_emoji=use_emoji)
+
+        if show_violinplot:
+            render_violinplot(
+                {f"{hour:02d}:00": count for hour, count in stats["hours"].items()},
+                "Commits by Hour",
+                use_emoji=use_emoji
+            )
+        else:
+            render_activity_chart(
+                {f"{hour:02d}:00": count for hour, count in stats["hours"].items()},
+                "Commits by Hour",
+                use_emoji=use_emoji
+            )
+
+        # Commit size distribution boxplot if requested
+        if show_boxplot:
+            # Get commit sizes (number of commits per day)
+            daily_commit_counts = defaultdict(int)
+            for commit in commit_data:
+                date_key = commit["date"].date().isoformat()
+                daily_commit_counts[date_key] += 1
+            if daily_commit_counts:
+                render_boxplot(list(daily_commit_counts.values()), "Daily Commit Distribution", use_emoji=use_emoji)
 
         # Commit Types Distribution
-        print(f"\n{COLORS['title']}Commit Types:{COLORS['reset']}")
+        types_emoji = f"{EMOJIS['check']} " if use_emoji else ""
+        print(f"\n{COLORS['title']}{types_emoji}Commit Types:{COLORS['reset']}")
         for type_name, count in stats["commit_types"].items():
             percentage = (count / stats["total_commits"]) * 100
             bar = "█" * int(percentage / 2)
@@ -487,12 +885,14 @@ def print_repository_insights(commit_data: List[Dict[str, Any]]) -> None:
 
         # Top Contributors
         if len(stats["authors"]) > 1:
-            print(f"\n{COLORS['title']}Top Contributors:{COLORS['reset']}")
+            contributors_emoji = f"{EMOJIS['star']} " if use_emoji else ""
+            print(f"\n{COLORS['title']}{contributors_emoji}Top Contributors:{COLORS['reset']}")
             for i, (author, commits) in enumerate(
                 list(stats["authors"].items())[:5], 1
             ):
+                trophy = f" {EMOJIS['trophy']}" if use_emoji and i == 1 else ""
                 print(
-                    f"{i}. {author}: {COLORS['number']}{commits}{COLORS['reset']} commits"
+                    f"{i}. {author}: {COLORS['number']}{commits}{COLORS['reset']} commits{trophy}"
                 )
 
     except subprocess.CalledProcessError:
@@ -526,7 +926,7 @@ def main() -> None:
     parser.add_argument(
         "-o",
         "--output",
-        choices=["text", "json", "csv"],
+        choices=["text", "json", "csv", "svg"],
         default="text",
         help="Output format",
     )
@@ -547,6 +947,45 @@ def main() -> None:
         "--velocity",
         action="store_true",
         help="Show code velocity (lines added/removed per period)",
+    )
+    parser.add_argument(
+        "-H",
+        "--heatmap",
+        action="store_true",
+        help="Show GitHub-style contribution heatmap",
+    )
+    parser.add_argument(
+        "-e",
+        "--emoji",
+        action="store_true",
+        help="Enable emoji mode for visual indicators",
+    )
+    parser.add_argument(
+        "-n",
+        "--notify",
+        action="store_true",
+        help="Send desktop notifications for milestones",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Disable progress bars",
+    )
+    parser.add_argument(
+        "--sparkline",
+        action="store_true",
+        help="Show sparkline trends in insights",
+    )
+    parser.add_argument(
+        "--boxplot",
+        action="store_true",
+        help="Show box plot for commit distribution",
+    )
+    parser.add_argument(
+        "--violinplot",
+        action="store_true",
+        help="Show violin plot for hourly/daily patterns",
     )
     parser.add_argument(
         "-V",
@@ -584,6 +1023,25 @@ def main() -> None:
         )
         return
 
+    # Check for milestones and send notifications
+    if args.notify:
+        total_commits = len(commit_data)
+        milestones = [100, 500, 1000, 5000, 10000]
+        for milestone in milestones:
+            if total_commits >= milestone and total_commits < milestone + 10:
+                send_notification(
+                    f"{EMOJIS['tada']} Milestone Reached!",
+                    f"Repository hit {milestone} commits!"
+                )
+
+        # Check for streak records
+        streaks = calculate_streaks(commit_data)
+        if streaks["current_streak"] >= 30:
+            send_notification(
+                f"{EMOJIS['fire']} Amazing Streak!",
+                f"Current streak: {streaks['current_streak']} days!"
+            )
+
     if args.output == "json":
         output = {
             "grouped_commits": grouped_commits,
@@ -608,10 +1066,32 @@ def main() -> None:
                 commit["author"],
                 commit["message"],
             ])
+    elif args.output == "svg":
+        # Generate SVG charts
+        svg_content = generate_svg_chart(grouped_commits, "commits", "Git Commit Activity")
+        if svg_content:
+            filename = "git-count-commits.svg"
+            with open(filename, 'w') as f:
+                f.write(svg_content)
+            success_msg = f"{EMOJIS['check']} " if args.emoji else ""
+            print(f"{success_msg}SVG chart saved to: {COLORS['number']}{filename}{COLORS['reset']}")
+
+        # Generate heatmap SVG if requested
+        if args.heatmap:
+            # For now, heatmap only available in text mode
+            print(f"{COLORS['alert']}Note: Heatmap SVG generation coming soon. Use text mode for now.{COLORS['reset']}")
     else:
-        render_bars(grouped_commits)
+        render_bars(grouped_commits, use_emoji=args.emoji)
+        if args.heatmap:
+            render_contribution_heatmap(commit_data, use_emoji=args.emoji)
         if args.insights:
-            print_repository_insights(commit_data)
+            print_repository_insights(
+                commit_data,
+                use_emoji=args.emoji,
+                show_sparkline=args.sparkline,
+                show_boxplot=args.boxplot,
+                show_violinplot=args.violinplot
+            )
         if args.churn:
             churn_data = get_file_churn(
                 author=args.author,
@@ -619,7 +1099,7 @@ def main() -> None:
                 until=args.until,
                 path=args.directory,
             )
-            render_file_churn(churn_data)
+            render_file_churn(churn_data, use_emoji=args.emoji)
         if args.velocity:
             velocity_data = get_velocity(
                 period=args.period,
@@ -628,7 +1108,7 @@ def main() -> None:
                 until=args.until,
                 path=args.directory,
             )
-            render_velocity(velocity_data)
+            render_velocity(velocity_data, use_emoji=args.emoji)
 
 
 if __name__ == "__main__":
