@@ -4,7 +4,6 @@ A powerful Git commit activity visualization tool with detailed repository insig
 
 [![PyPI Downloads](https://static.pepy.tech/badge/git-count)](https://pepy.tech/projects/git-count)
 ![Python Version](https://img.shields.io/pypi/pyversions/git-count)
-[![CI](https://github.com/techUdayMungalpara/git_count/actions/workflows/ci.yml/badge.svg)](https://github.com/techUdayMungalpara/git_count/actions/workflows/ci.yml)
 
 ## Installation
 
